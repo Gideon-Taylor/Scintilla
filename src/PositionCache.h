@@ -46,6 +46,19 @@ public:
 
 /**
  */
+struct InlayHintLayout {
+	Sci::Position position = 0;
+	std::string text;
+	int style = 0;
+	XYPOSITION width = 0.0;
+	XYPOSITION textWidth = 0.0;
+	XYPOSITION paddingLeft = 0.0;
+	XYPOSITION paddingRight = 0.0;
+	XYPOSITION xStart = 0.0;
+};
+
+/**
+ */
 class LineLayout {
 private:
 	std::unique_ptr<int []>lineStarts;
@@ -69,6 +82,7 @@ public:
 	unsigned char bracePreviousStyles[2];
 
 	std::unique_ptr<BidiData> bidiData;
+	std::vector<InlayHintLayout> inlayHints;
 
 	// Wrapped line support
 	int widthLine;
@@ -96,6 +110,7 @@ public:
 	void RestoreBracesHighlight(Range rangeLine, const Sci::Position braces[], bool ignoreStyle);
 	int FindBefore(XYPOSITION x, Range range) const noexcept;
 	int FindPositionFromX(XYPOSITION x, Range range, bool charPosition) const noexcept;
+	int FindPositionFromXWithInlayHints(XYPOSITION x, Range range, bool charPosition) const noexcept;
 	Point PointFromPosition(int posInLine, int lineHeight, PointEnd pe) const noexcept;
 	XYPOSITION XInLine(Sci::Position index) const noexcept;
 	Interval Span(int start, int end) const noexcept;

@@ -270,6 +270,27 @@ int LineLayout::FindPositionFromX(XYPOSITION x, Range range, bool charPosition) 
 	return static_cast<int>(range.end);
 }
 
+int LineLayout::FindPositionFromXWithInlayHints(XYPOSITION x, Range range, bool charPosition) const noexcept {
+	if (inlayHints.empty()) {
+		return FindPositionFromX(x, range, charPosition);
+	}
+	for (const InlayHintLayout& hint : inlayHints) {
+		if (hint.position < range.start) {
+			continue;
+		}
+		if (hint.position > range.end) {
+			break;
+		}
+		if (x < hint.xStart) {
+			break;
+		}
+		if (x < (hint.xStart + hint.width)) {
+			return static_cast<int>(hint.position);
+		}
+	}
+	return FindPositionFromX(x, range, charPosition);
+}
+
 Point LineLayout::PointFromPosition(int posInLine, int lineHeight, PointEnd pe) const noexcept {
 	Point pt;
 	// In case of very long line put x at arbitrary large position

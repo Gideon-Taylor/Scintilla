@@ -19,6 +19,7 @@
 #include <memory>
 
 #include "ScintillaTypes.h"
+#include "ScintillaStructures.h"
 
 #include "Debugging.h"
 #include "Geometry.h"
@@ -552,3 +553,340 @@ int LineTabstops::GetNextTabstop(Sci::Line line, int x) const noexcept {
 	}
 	return 0;
 }
+
+LineInlayHints::LineInlayHints() : handleCurrent(0) {
+}
+
+LineInlayHints::~LineInlayHints() {
+}
+
+void LineInlayHints::Init() {
+	hints.DeleteAll();
+}
+
+void LineInlayHints::InsertLine(Sci::Line line) {
+	if (hints.Length()) {
+		hints.EnsureLength(line);
+		hints.Insert(line, nullptr);
+	}
+}
+
+void LineInlayHints::InsertLines(Sci::Line line, Sci::Line lines) {
+	if (hints.Length()) {
+		hints.EnsureLength(line);
+		hints.InsertEmpty(line, lines);
+	}
+}
+
+void LineInlayHints::RemoveLine(Sci::Line line) {
+	if (hints.Length() > line) {
+		hints[line].reset();
+		hints.Delete(line);
+	}
+}
+
+int LineInlayHints::SetHint(Sci::Line line, Sci::Position position,
+	const char* text, int style, bool paddingLeft, bool paddingRight, int handle) {
+	if (handle == 0) {
+		// Create new hint
+		hints.EnsureLength(line + 1);
+		if (!hints[line]) {
+			hints[line] = std::make_unique<std::vector<InlayHint>>();
+		}
+
+		std::vector<InlayHint>* lineHints = hints[line].get();
+
+		// Allocate new handle
+		const int hintHandle = ++handleCurrent;
+
+		// Create new hint with handle
+		InlayHint hint(hintHandle, position, text ? text : "", style);
+		hint.paddingLeft = paddingLeft;
+		hint.paddingRight = paddingRight;
+
+		// Insert in sorted order (binary search insertion point)
+		auto it = std::lower_bound(lineHints->begin(), lineHints->end(), hint);
+		lineHints->insert(it, hint);
+
+		return hintHandle;
+	}
+
+	// Update existing hint - search all lines for the hint with this handle
+	for (Sci::Line searchLine = 0; searchLine < hints.Length(); searchLine++) {
+		std::vector<InlayHint>* lineHints = hints[searchLine].get();
+		if (!lineHints) continue;
+
+		auto it = std::find_if(lineHints->begin(), lineHints->end(),
+			[handle](const InlayHint& h) { return h.handle == handle; });
+
+		if (it != lineHints->end()) {
+			it->text = text ? text : "";
+			it->style = style;
+			it->paddingLeft = paddingLeft;
+			it->paddingRight = paddingRight;
+			// Note: line and position are not updated for existing hints
+			return handle;
+		}
+	}
+
+	// Handle not found
+	return -1;
+}
+
+bool LineInlayHints::GetHint(int hintHandle, Sci::Line &line, Sci::Position &position,
+	int &style, const char *&text, bool &paddingLeft, bool &paddingRight) const noexcept {
+	// Search all lines for the hint with this handle
+	for (Sci::Line searchLine = 0; searchLine < hints.Length(); searchLine++) {
+		const std::vector<InlayHint>* lineHints = hints[searchLine].get();
+		if (!lineHints) continue;
+
+		auto it = std::find_if(lineHints->begin(), lineHints->end(),
+			[hintHandle](const InlayHint& h) { return h.handle == hintHandle; });
+
+		if (it != lineHints->end()) {
+			line = searchLine;
+			position = it->position;
+			style = it->style;
+			text = it->text.c_str();
+			paddingLeft = it->paddingLeft;
+			paddingRight = it->paddingRight;
+			return true;
+		}
+	}
+	return false;
+}
+
+void LineInlayHints::RemoveHint(int hintHandle) {
+	// Search all lines for the hint with this handle
+	for (Sci::Line line = 0; line < hints.Length(); line++) {
+		std::vector<InlayHint>* lineHints = hints[line].get();
+		if (!lineHints) continue;
+
+		auto it = std::find_if(lineHints->begin(), lineHints->end(),
+			[hintHandle](const InlayHint& h) { return h.handle == hintHandle; });
+
+		if (it != lineHints->end()) {
+			lineHints->erase(it);
+
+			// Clean up empty vector
+			if (lineHints->empty()) {
+				hints[line].reset();
+			}
+			return;
+		}
+	}
+}
+
+void LineInlayHints::RemoveHintsInRange(Sci::Line line, Sci::Position start, Sci::Position end) {
+	if (line < 0 || line >= hints.Length()) return;
+
+	std::vector<InlayHint>* lineHints = hints[line].get();
+	if (!lineHints) return;
+
+	// Remove all hints within the range [start, end)
+	auto it = lineHints->begin();
+	while (it != lineHints->end()) {
+		if (it->position >= start && it->position < end) {
+			it = lineHints->erase(it);
+		}
+		else {
+			++it;
+		}
+	}
+
+	// Clean up empty vector
+	if (lineHints->empty()) {
+		hints[line].reset();
+	}
+}
+
+void LineInlayHints::ClearLine(Sci::Line line) {
+	if (line >= 0 && line < hints.Length()) {
+		hints[line].reset();
+	}
+}
+
+void LineInlayHints::ClearAll() {
+	hints.DeleteAll();
+}
+
+const std::vector<InlayHint>* LineInlayHints::GetHints(Sci::Line line) const noexcept {
+	if (line >= 0 && line < hints.Length()) {
+		return hints.ValueAt(line).get();
+	}
+	return nullptr;
+}
+
+Sci::Position LineInlayHints::GetInlayInfo(void *buffer, Sci::Position bufferSize) const {
+	const size_t structSize = sizeof(Scintilla::InlayInfo);
+	size_t totalSize = 0;
+
+	// Calculate total size needed
+	for (Sci::Line line = 0; line < hints.Length(); line++) {
+		if (hints[line]) {
+			totalSize += hints[line]->size() * structSize;
+		}
+	}
+
+	// If buffer is NULL, return required size
+	if (!buffer) {
+		return static_cast<Sci::Position>(totalSize);
+	}
+
+	// Write to buffer
+	Scintilla::InlayInfo *dest = static_cast<Scintilla::InlayInfo *>(buffer);
+	size_t written = 0;
+
+	for (Sci::Line line = 0; line < hints.Length(); line++) {
+		if (hints[line]) {
+			for (const InlayHint &hint : *hints[line]) {
+				if (written + structSize > static_cast<size_t>(bufferSize)) {
+					return static_cast<Sci::Position>(written);
+				}
+				dest->handle = hint.handle;
+				dest->line = line;
+				dest->position = hint.position;
+				dest->style = hint.style;
+				dest->text = hint.text.c_str();
+				dest->paddingLeft = hint.paddingLeft;
+				dest->paddingRight = hint.paddingRight;
+				dest++;
+				written += structSize;
+			}
+		}
+	}
+
+	return static_cast<Sci::Position>(written);
+}
+
+bool LineInlayHints::HasHints(Sci::Line line) const noexcept {
+	const std::vector<InlayHint>* lineHints = GetHints(line);
+	return lineHints && !lineHints->empty();
+}
+
+void LineInlayHints::AdjustHints(Sci::Line line, Sci::Position position,
+	Sci::Position delta) {
+	if (line < 0 || line >= hints.Length()) return;
+
+	std::vector<InlayHint>* lineHints = hints[line].get();
+	if (!lineHints) return;
+
+	auto it = lineHints->begin();
+	while (it != lineHints->end()) {
+		if (it->position > position) {
+			// Hint is after change - adjust position
+			it->position += delta;
+
+			// If delta is negative and hint moved before position, remove it
+			if (delta < 0 && it->position < position) {
+				it = lineHints->erase(it);
+				continue;
+			}
+		}
+		else if (it->position == position && delta < 0) {
+			// Deletion at hint position - remove hint
+			it = lineHints->erase(it);
+			continue;
+		}
+		++it;
+	}
+
+	// Clean up if empty
+	if (lineHints->empty()) {
+		hints[line].reset();
+	}
+}
+
+void LineInlayHints::MoveHintsAfterInsert(Sci::Line line, Sci::Position position,
+	Sci::Line linesAdded, Sci::Position lastSegmentLength) {
+	if (linesAdded <= 0 || line < 0 || line >= hints.Length()) {
+		return;
+	}
+	std::vector<InlayHint>* lineHints = hints[line].get();
+	if (!lineHints || lineHints->empty()) {
+		return;
+	}
+
+	std::vector<InlayHint> moved;
+	auto it = lineHints->begin();
+	while (it != lineHints->end()) {
+		if (it->position > position) {
+			moved.push_back(*it);
+			it = lineHints->erase(it);
+		}
+		else {
+			++it;
+		}
+	}
+
+	if (lineHints->empty()) {
+		hints[line].reset();
+	}
+	if (moved.empty()) {
+		return;
+	}
+
+	const Sci::Line lineTarget = line + linesAdded;
+	hints.EnsureLength(lineTarget + 1);
+	if (!hints[lineTarget]) {
+		hints[lineTarget] = std::make_unique<std::vector<InlayHint>>();
+	}
+	std::vector<InlayHint>* targetHints = hints[lineTarget].get();
+
+	for (InlayHint& hint : moved) {
+		hint.position = lastSegmentLength + (hint.position - position);
+		auto insertIt = std::lower_bound(targetHints->begin(), targetHints->end(), hint);
+		targetHints->insert(insertIt, hint);
+	}
+}
+
+void LineInlayHints::MergeLines(Sci::Line lineStart, Sci::Position positionStart,
+	Sci::Line lineEnd, Sci::Position positionEnd) {
+	if (lineStart < 0 || lineEnd <= lineStart) {
+		return;
+	}
+	if (lineStart >= hints.Length() || lineEnd >= hints.Length()) {
+		return;
+	}
+
+	std::vector<InlayHint>* startHints = hints[lineStart].get();
+	if (startHints) {
+		startHints->erase(std::remove_if(startHints->begin(), startHints->end(),
+			[positionStart](const InlayHint& hint) {
+				return hint.position > positionStart;
+			}), startHints->end());
+		if (startHints->empty()) {
+			hints[lineStart].reset();
+			startHints = nullptr;
+		}
+	}
+
+	std::vector<InlayHint>* endHints = hints[lineEnd].get();
+	if (!endHints || endHints->empty()) {
+		return;
+	}
+
+	std::vector<InlayHint> moved;
+	for (const InlayHint& hint : *endHints) {
+		if (hint.position >= positionEnd) {
+			InlayHint movedHint = hint;
+			movedHint.position = positionStart + (hint.position - positionEnd);
+			moved.push_back(std::move(movedHint));
+		}
+	}
+	endHints->clear();
+	hints[lineEnd].reset();
+
+	if (moved.empty()) {
+		return;
+	}
+	if (!startHints) {
+		hints[lineStart] = std::make_unique<std::vector<InlayHint>>();
+		startHints = hints[lineStart].get();
+	}
+	for (InlayHint& hint : moved) {
+		auto insertIt = std::lower_bound(startHints->begin(), startHints->end(), hint);
+		startHints->insert(insertIt, hint);
+	}
+}
+

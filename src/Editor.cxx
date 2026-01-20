@@ -2870,6 +2870,23 @@ void Editor::NotifyModified(Document *, DocModification mh, void *) {
 				Redraw();
 			}
 		}
+		if (FlagSet(mh.modificationType, ModificationFlags::ChangeInlayHint)) {
+			view.llc.Invalidate(LineLayout::ValidLevel::invalid);
+			if (Wrapping()) {
+				if (mh.line >= 0) {
+					NeedWrapping(mh.line, mh.line + 1);
+				}
+				else {
+					NeedWrapping(0, pdoc->LinesTotal());
+				}
+			}
+			if (mh.line >= 0) {
+				InvalidateRange(pdoc->LineStart(mh.line), pdoc->LineStart(mh.line + 1));
+			}
+			else {
+				Redraw();
+			}
+		}
 		CheckModificationForWrap(mh);
 		if (mh.linesAdded != 0) {
 			// Avoid scrolling of display if change before current display
@@ -8872,6 +8889,58 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::EOLAnnotationGetStyleOffset:
 		return vs.eolAnnotationStyleOffset;
+
+	case Message::SetInlayHint:
+		{
+			const Scintilla::InlayInfo *info = static_cast<const Scintilla::InlayInfo *>(PtrFromUPtr(wParam));
+			if (info) {
+				return pdoc->SetInlayHint(static_cast<Sci::Line>(info->line),
+					static_cast<Sci::Position>(info->position), info->text, info->style,
+					info->paddingLeft, info->paddingRight, info->handle);
+			}
+			return -1;
+		}
+
+	case Message::GetInlayHint:
+		{
+			Scintilla::InlayInfo *info = static_cast<Scintilla::InlayInfo *>(PtrFromSPtr(lParam));
+			if (info) {
+				Sci::Line line;
+				Sci::Position position;
+				int style;
+				const char *text;
+				bool paddingLeft, paddingRight;
+				if (pdoc->GetInlayHint(static_cast<int>(wParam), line, position, style, text, paddingLeft, paddingRight)) {
+					info->handle = static_cast<int>(wParam);
+					info->line = line;
+					info->position = position;
+					info->style = style;
+					info->text = text;
+					info->paddingLeft = paddingLeft;
+					info->paddingRight = paddingRight;
+					return 1;
+				}
+			}
+			return 0;
+		}
+
+	case Message::InlayHintRemove:
+		pdoc->InlayHintRemove(static_cast<int>(wParam));
+		break;
+
+	case Message::InlayHintClearLine:
+		pdoc->InlayHintClearLine(LineFromUPtr(wParam));
+		break;
+
+	case Message::InlayHintClearAll:
+		pdoc->InlayHintClearAll();
+		break;
+
+	case Message::GetInlayInfo:
+		return pdoc->GetInlayInfo(PtrFromUPtr(wParam), static_cast<Sci::Position>(lParam));
+
+	case Message::InlayHintsSupported:
+		return 1;
 
 	case Message::ReleaseAllExtendedStyles:
 		vs.ReleaseAllExtendedStyles();
