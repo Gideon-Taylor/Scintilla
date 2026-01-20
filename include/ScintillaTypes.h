@@ -572,7 +572,8 @@ enum class ModificationFlags {
 	InsertCheck = 0x100000,
 	ChangeTabStops = 0x200000,
 	ChangeEOLAnnotation = 0x400000,
-	EventMaskAll = 0x7FFFFF,
+	ChangeInlayHint = 0x800000,
+	EventMaskAll = 0xFFFFFF,
 };
 
 enum class Update {

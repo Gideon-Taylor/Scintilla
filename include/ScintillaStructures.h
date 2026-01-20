@@ -124,6 +124,16 @@ struct NotificationData {
 	CharacterSource characterSource;	/* SCN_CHARADDED */
 };
 
+struct InlayInfo {
+	int handle;
+	Position line;
+	Position position;
+	int style;
+	const char *text;
+	bool paddingLeft;
+	bool paddingRight;
+};
+
 }
 
 #endif

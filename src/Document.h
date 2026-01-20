@@ -8,6 +8,8 @@
 #ifndef DOCUMENT_H
 #define DOCUMENT_H
 
+#include <vector>
+
 namespace Scintilla::Internal {
 
 class DocWatcher;
@@ -17,6 +19,8 @@ class LineMarkers;
 class LineLevels;
 class LineState;
 class LineAnnotation;
+struct InlayHint;
+class LineInlayHints;
 
 enum class EncodingFamily { eightBit, unicode, dbcs };
 
@@ -292,7 +296,7 @@ private:
 	std::vector<WatcherWithUserData> watchers;
 
 	// ldSize is not real data - it is for dimensions and loops
-	enum lineData { ldMarkers, ldLevels, ldState, ldMargin, ldAnnotation, ldEOLAnnotation, ldSize };
+	enum lineData { ldMarkers, ldLevels, ldState, ldMargin, ldAnnotation, ldEOLAnnotation, ldInlayHints, ldSize };
 	std::unique_ptr<PerLine> perLineData[ldSize];
 	LineMarkers *Markers() const noexcept;
 	LineLevels *Levels() const noexcept;
@@ -300,6 +304,7 @@ private:
 	LineAnnotation *Margins() const noexcept;
 	LineAnnotation *Annotations() const noexcept;
 	LineAnnotation *EOLAnnotations() const noexcept;
+	LineInlayHints* InlayHints() const noexcept;
 
 	bool matchesValid;
 	std::unique_ptr<RegexSearchBase> regex;
@@ -555,6 +560,14 @@ public:
 	void EOLAnnotationSetStyle(Sci::Line line, int style);
 	void EOLAnnotationSetText(Sci::Line line, const char *text);
 	void EOLAnnotationClearAll();
+
+	int SetInlayHint(Sci::Line line, Sci::Position position, const char* text, int style, bool paddingLeft, bool paddingRight, int handle);
+	bool GetInlayHint(int hintHandle, Sci::Line &line, Sci::Position &position, int &style, const char *&text, bool &paddingLeft, bool &paddingRight) const noexcept;
+	void InlayHintRemove(int hintHandle);
+	void InlayHintClearLine(Sci::Line line);
+	void InlayHintClearAll();
+	Sci::Position GetInlayInfo(void *buffer, Sci::Position bufferSize) const;
+	const std::vector<InlayHint>* InlayHintsForLine(Sci::Line line) const noexcept;
 
 	bool AddWatcher(DocWatcher *watcher, void *userData);
 	bool RemoveWatcher(DocWatcher *watcher, void *userData) noexcept;
