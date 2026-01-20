@@ -481,6 +481,33 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 		ll->chars[numCharsInLine] = 0;   // Also triggers processing in the loops as this is a control character
 		ll->styles[numCharsInLine] = styleByteLast;	// For eolFilled
 
+		ll->inlayHints.clear();
+		const std::vector<InlayHint>* lineHints = model.pdoc->InlayHintsForLine(line);
+		if (lineHints && !lineHints->empty()) {
+			ll->inlayHints.reserve(lineHints->size());
+			for (const InlayHint& hint : *lineHints) {
+				if (hint.position < 0 || hint.position > numCharsInLine) {
+					continue;
+				}
+				const int styleNumber = vstyle.ValidStyle(hint.style) ? hint.style : StyleDefault;
+				const Style& style = vstyle.styles[styleNumber];
+				const std::string_view hintText(hint.text);
+				InlayHintLayout hintLayout;
+				hintLayout.position = hint.position;
+				hintLayout.text = hint.text;
+				hintLayout.style = styleNumber;
+				hintLayout.textWidth = surface->WidthText(style.font.get(), hintText);
+				hintLayout.paddingLeft = hint.paddingLeft ? vstyle.spaceWidth * 0.5f : 0.0f;
+				hintLayout.paddingRight = hint.paddingRight ? vstyle.spaceWidth * 0.5f : 0.0f;
+				hintLayout.width = hintLayout.textWidth + hintLayout.paddingLeft + hintLayout.paddingRight;
+				ll->inlayHints.push_back(std::move(hintLayout));
+			}
+			std::sort(ll->inlayHints.begin(), ll->inlayHints.end(),
+				[](const InlayHintLayout& a, const InlayHintLayout& b) noexcept {
+					return a.position < b.position;
+				});
+		}
+
 		// Layout the line, determining the position of each character,
 		// with an extra element at the end for the end of the line.
 		ll->positions[0] = 0;
@@ -542,6 +569,21 @@ void EditView::LayoutLine(const EditModel &model, Surface *surface, const ViewSt
 			for (int i = 0; i < ts.length; i++) {
 				xPosition = ll->positions[iByte] + xBeginSegment;
 				ll->positions[iByte++] = xPosition;
+			}
+		}
+
+		if (!ll->inlayHints.empty()) {
+			XYPOSITION hintOffset = 0.0;
+			size_t hintIndex = 0;
+			for (int i = 0; i <= numCharsInLine; i++) {
+				const XYPOSITION basePosition = ll->positions[i];
+				while ((hintIndex < ll->inlayHints.size()) && (ll->inlayHints[hintIndex].position == i)) {
+					InlayHintLayout& hint = ll->inlayHints[hintIndex];
+					hint.xStart = basePosition + hintOffset;
+					hintOffset += hint.width;
+					hintIndex++;
+				}
+				ll->positions[i] = basePosition + hintOffset;
 			}
 		}
 
@@ -740,7 +782,7 @@ SelectionPosition EditView::SPositionFromLocation(Surface *surface, const EditMo
 				positionInLine = slLayout->PositionFromX(pt.x, charPosition) +
 					rangeSubLine.start;
 			} else {
-				positionInLine = ll->FindPositionFromX(pt.x + subLineStart,
+				positionInLine = ll->FindPositionFromXWithInlayHints(pt.x + subLineStart,
 					rangeSubLine, charPosition);
 			}
 			if (positionInLine < rangeSubLine.end) {
@@ -777,7 +819,7 @@ SelectionPosition EditView::SPositionFromLineX(Surface *surface, const EditModel
 		LayoutLine(model, surface, vs, ll.get(), model.wrapWidth);
 		const Range rangeSubLine = ll->SubLineRange(0, LineLayout::Scope::visibleOnly);
 		const XYPOSITION subLineStart = ll->positions[rangeSubLine.start];
-		const Sci::Position positionInLine = ll->FindPositionFromX(x + subLineStart, rangeSubLine, false);
+		const Sci::Position positionInLine = ll->FindPositionFromXWithInlayHints(x + subLineStart, rangeSubLine, false);
 		if (positionInLine < rangeSubLine.end) {
 			return SelectionPosition(model.pdoc->MovePositionOutsideChar(positionInLine + posLineStart, 1));
 		}
@@ -1376,6 +1418,39 @@ constexpr bool AnnotationBoxedOrIndented(AnnotationVisible annotationVisible) no
 	return annotationVisible == AnnotationVisible::Boxed || annotationVisible == AnnotationVisible::Indented;
 }
 
+}
+
+void EditView::DrawInlayHints(Surface* surface, const EditModel& /*model*/, const ViewStyle& vsDraw, const LineLayout* ll,
+	Sci::Line /*line*/, int xStart, PRectangle rcLine, int subLine, XYPOSITION subLineStart, DrawPhase phase) {
+	if (ll->inlayHints.empty()) {
+		return;
+	}
+	const Range lineRange = ll->SubLineRange(subLine, LineLayout::Scope::visibleOnly);
+	const XYPOSITION ybase = rcLine.top + vsDraw.maxAscent;
+	for (const InlayHintLayout& hint : ll->inlayHints) {
+		if (hint.position < lineRange.start || hint.position > lineRange.end) {
+			continue;
+		}
+		if (hint.text.empty()) {
+			continue;
+		}
+		const Style& style = vsDraw.styles[hint.style];
+		const XYPOSITION xHint = static_cast<XYPOSITION>(xStart) + hint.xStart - subLineStart;
+		PRectangle rcHint = rcLine;
+		rcHint.left = xHint;
+		rcHint.right = xHint + hint.width;
+		// Fill background in back phase
+		if (FlagSet(phase, DrawPhase::back)) {
+			surface->FillRectangleAligned(rcHint, Fill(style.back));
+		}
+		// Draw text transparently over the background in text phase
+		if (FlagSet(phase, DrawPhase::text)) {
+			PRectangle rcText = rcLine;
+			rcText.left = xHint + hint.paddingLeft;
+			rcText.right = rcText.left + hint.textWidth;
+			surface->DrawTextTransparent(rcText, style.font.get(), ybase, hint.text, style.fore);
+		}
+	}
 }
 
 void EditView::DrawAnnotation(Surface *surface, const EditModel &model, const ViewStyle &vsDraw, const LineLayout *ll,
@@ -2428,6 +2503,7 @@ void EditView::DrawLine(Surface *surface, const EditModel &model, const ViewStyl
 			DrawBackground(surface, model, vsDraw, ll,
 				xStart, rcLine, subLine, lineRange, posLineStart,
 				background);
+			DrawInlayHints(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, DrawPhase::back);
 			DrawFoldDisplayText(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, DrawPhase::back);
 			DrawEOLAnnotationText(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, DrawPhase::back);
 			// Remove drawBack to not draw again in DrawFoldDisplayText
@@ -2455,6 +2531,7 @@ void EditView::DrawLine(Surface *surface, const EditModel &model, const ViewStyl
 		DrawForeground(surface, model, vsDraw, ll,
 			xStart, rcLine, subLine, lineVisible, lineRange, posLineStart,
 			background);
+		DrawInlayHints(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, phase);
 	}
 
 	if (FlagSet(phase, DrawPhase::indentationGuides)) {

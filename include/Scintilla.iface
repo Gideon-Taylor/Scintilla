@@ -3100,6 +3100,30 @@ set void EOLAnnotationSetStyleOffset=2747(int style,)
 # Get the start of the range of style numbers used for end of line annotations
 get int EOLAnnotationGetStyleOffset=2748(,)
 
+# Inlay hints - non-selectable text overlays at specific positions within lines
+# Set or create an inlay hint. If handle in struct is 0, creates new hint and returns handle.
+# If handle is non-zero, updates existing hint and returns same handle. Returns -1 if updating non-existent handle.
+fun int SetInlayHint=2900(pointer inlayInfo,)
+
+# Get information about a specific inlay hint by handle. Returns true if found.
+fun bool GetInlayHint=2901(int hintHandle, pointer inlayInfo)
+
+# Remove an inlay hint identified by its handle
+fun void InlayHintRemove=2902(int hintHandle,)
+
+# Clear all inlay hints from a specific line
+fun void InlayHintClearLine=2903(line line,)
+
+# Clear all inlay hints from the document
+fun void InlayHintClearAll=2904(,)
+
+# Get information about all inlay hints. If buffer is NULL, returns size needed.
+# Otherwise writes InlayInfo structs to buffer and returns bytes written.
+fun position GetInlayInfo=2905(pointer buffer, position bufferSize)
+
+# Check if inlay hints are supported by this version of Scintilla
+get bool InlayHintsSupported=2906(,)
+
 enu Supports=SC_SUPPORTS_
 val SC_SUPPORTS_LINE_DRAWS_FINAL=0
 val SC_SUPPORTS_PIXEL_DIVISIONS=1
@@ -3273,7 +3297,8 @@ val SC_MOD_LEXERSTATE=0x80000
 val SC_MOD_INSERTCHECK=0x100000
 val SC_MOD_CHANGETABSTOPS=0x200000
 val SC_MOD_CHANGEEOLANNOTATION=0x400000
-val SC_MODEVENTMASKALL=0x7FFFFF
+val SC_MOD_CHANGEINLAYHINT=0x800000
+val SC_MODEVENTMASKALL=0xFFFFFF
 
 ali SC_MOD_INSERTTEXT=INSERT_TEXT
 ali SC_MOD_DELETETEXT=DELETE_TEXT
@@ -3294,6 +3319,7 @@ ali SC_MOD_LEXERSTATE=LEXER_STATE
 ali SC_MOD_INSERTCHECK=INSERT_CHECK
 ali SC_MOD_CHANGETABSTOPS=CHANGE_TAB_STOPS
 ali SC_MOD_CHANGEEOLANNOTATION=CHANGE_E_O_L_ANNOTATION
+ali SC_MOD_CHANGEINLAYHINT=CHANGE_INLAY_HINT
 ali SC_MODEVENTMASKALL=EVENT_MASK_ALL
 
 enu Update=SC_UPDATE_

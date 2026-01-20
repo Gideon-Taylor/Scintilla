@@ -169,6 +169,7 @@ Document::Document(DocumentOption options) :
 	perLineData[ldMargin] = std::make_unique<LineAnnotation>();
 	perLineData[ldAnnotation] = std::make_unique<LineAnnotation>();
 	perLineData[ldEOLAnnotation] = std::make_unique<LineAnnotation>();
+	perLineData[ldInlayHints] = std::make_unique<LineInlayHints>();
 
 	decorations = DecorationListCreate(IsLarge());
 
@@ -246,6 +247,10 @@ LineAnnotation *Document::Annotations() const noexcept {
 
 LineAnnotation *Document::EOLAnnotations() const noexcept {
 	return static_cast<LineAnnotation *>(perLineData[ldEOLAnnotation].get());
+}
+
+LineInlayHints* Document::InlayHints() const noexcept {
+	return static_cast<LineInlayHints*>(perLineData[ldInlayHints].get());
 }
 
 LineEndType Document::LineEndTypesSupported() const {
@@ -1261,6 +1266,13 @@ bool Document::DeleteChars(Sci::Position pos, Sci::Position len) {
 			        ModificationFlags::BeforeDelete | ModificationFlags::User,
 			        pos, len,
 				0, nullptr));
+			const Sci::Line lineStart = SciLineFromPosition(pos);
+			const Sci::Line lineEnd = SciLineFromPosition(pos + len);
+			if (lineEnd > lineStart) {
+				const Sci::Position posInStartLine = pos - LineStart(lineStart);
+				const Sci::Position posInEndLine = (pos + len) - LineStart(lineEnd);
+				InlayHints()->MergeLines(lineStart, posInStartLine, lineEnd, posInEndLine);
+			}
 			const Sci::Line prevLinesTotal = LinesTotal();
 			const bool startSavePoint = cb.IsSavePoint();
 			bool startSequence = false;
@@ -2586,6 +2598,79 @@ void Document::EOLAnnotationClearAll() {
 	EOLAnnotations()->ClearAll();
 }
 
+int Document::SetInlayHint(Sci::Line line, Sci::Position position, const char* text, int style, bool paddingLeft, bool paddingRight, int handle) {
+	if (handle == 0) {
+		// Creating new hint - validate line and position
+		if (line < 0 || line >= LinesTotal()) {
+			return -1;
+		}
+		// Validate that position is within line bounds (line-relative position)
+		const Sci::Position lineLength = LineEnd(line) - LineStart(line);
+		if (position < 0 || position > lineLength) {
+			return -1;
+		}
+	}
+
+	const int result = InlayHints()->SetHint(line, position, text, style, paddingLeft, paddingRight, handle);
+	if (result >= 0) {
+		// For new hints, use the provided line; for updates, find the line from the handle
+		Sci::Line notifyLine = line;
+		if (handle != 0) {
+			Sci::Position pos;
+			int sty;
+			const char *txt;
+			bool padL, padR;
+			if (InlayHints()->GetHint(handle, notifyLine, pos, sty, txt, padL, padR)) {
+				// notifyLine is now set
+			}
+		}
+		const DocModification mh(ModificationFlags::ChangeInlayHint, LineStart(notifyLine), 0, 0, nullptr, notifyLine);
+		NotifyModified(mh);
+	}
+	return result;
+}
+
+bool Document::GetInlayHint(int hintHandle, Sci::Line &line, Sci::Position &position, int &style, const char *&text, bool &paddingLeft, bool &paddingRight) const noexcept {
+	return InlayHints()->GetHint(hintHandle, line, position, style, text, paddingLeft, paddingRight);
+}
+
+void Document::InlayHintRemove(int hintHandle) {
+	Sci::Line line;
+	Sci::Position position;
+	int style;
+	const char *text;
+	bool paddingLeft, paddingRight;
+	const bool found = InlayHints()->GetHint(hintHandle, line, position, style, text, paddingLeft, paddingRight);
+	InlayHints()->RemoveHint(hintHandle);
+	if (found) {
+		const DocModification mh(ModificationFlags::ChangeInlayHint, LineStart(line), 0, 0, nullptr, line);
+		NotifyModified(mh);
+	}
+}
+
+void Document::InlayHintClearLine(Sci::Line line) {
+	if (line >= 0 && line < LinesTotal()) {
+		InlayHints()->ClearLine(line);
+		const DocModification mh(ModificationFlags::ChangeInlayHint, LineStart(line), 0, 0, nullptr, line);
+		NotifyModified(mh);
+	}
+}
+
+void Document::InlayHintClearAll() {
+	InlayHints()->ClearAll();
+	DocModification mh(ModificationFlags::ChangeInlayHint);
+	mh.line = -1;
+	NotifyModified(mh);
+}
+
+Sci::Position Document::GetInlayInfo(void *buffer, Sci::Position bufferSize) const {
+	return InlayHints()->GetInlayInfo(buffer, bufferSize);
+}
+
+const std::vector<InlayHint>* Document::InlayHintsForLine(Sci::Line line) const noexcept {
+	return InlayHints()->GetHints(line);
+}
+
 void Document::IncrementStyleClock() noexcept {
 	styleClock = (styleClock + 1) % 0x100000;
 }
@@ -2645,10 +2730,30 @@ void Document::NotifySavePoint(bool atSavePoint) {
 void Document::NotifyModified(DocModification mh) {
 	if (FlagSet(mh.modificationType, ModificationFlags::InsertText)) {
 		decorations->InsertSpace(mh.position, mh.length);
-	} else if (FlagSet(mh.modificationType, ModificationFlags::DeleteText)) {
-		decorations->DeleteRange(mh.position, mh.length);
+		const Sci::Line line = SciLineFromPosition(mh.position);
+		const Sci::Position positionInLine = mh.position - LineStart(line);
+		if (mh.linesAdded == 0) {
+			InlayHints()->AdjustHints(line, positionInLine, mh.length);
+		}
+		else if (mh.linesAdded > 0) {
+			const Sci::Line lineTarget = line + mh.linesAdded;
+			if (lineTarget < LinesTotal()) {
+				const Sci::Position lineTargetStart = LineStart(lineTarget);
+				const Sci::Position insertedUpToLastLine = lineTargetStart - mh.position;
+				const Sci::Position lastSegmentLength = std::max<Sci::Position>(0, mh.length - insertedUpToLastLine);
+				InlayHints()->MoveHintsAfterInsert(line, positionInLine, mh.linesAdded, lastSegmentLength);
+			}
+		}
 	}
-	for (const WatcherWithUserData &watcher : watchers) {
+	else if (FlagSet(mh.modificationType, ModificationFlags::DeleteText)) {
+		decorations->DeleteRange(mh.position, mh.length);
+		if (mh.linesAdded == 0) {
+			const Sci::Line line = SciLineFromPosition(mh.position);
+			const Sci::Position positionInLine = mh.position - LineStart(line);
+			InlayHints()->AdjustHints(line, positionInLine, -mh.length);
+		}
+	}
+	for (const WatcherWithUserData& watcher : watchers) {
 		watcher.watcher->NotifyModified(this, mh, watcher.userData);
 	}
 }

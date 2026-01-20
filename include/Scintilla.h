@@ -1128,6 +1128,13 @@ typedef sptr_t (*SciFnDirectStatus)(sptr_t ptr, unsigned int iMessage, uptr_t wP
 #define SCI_EOLANNOTATIONGETVISIBLE 2746
 #define SCI_EOLANNOTATIONSETSTYLEOFFSET 2747
 #define SCI_EOLANNOTATIONGETSTYLEOFFSET 2748
+#define SCI_SETINLAYHINT 2900
+#define SCI_GETINLAYHINT 2901
+#define SCI_INLAYHINTREMOVE 2902
+#define SCI_INLAYHINTCLEARLINE 2903
+#define SCI_INLAYHINTCLEARALL 2904
+#define SCI_GETINLAYINFO 2905
+#define SCI_INLAYHINTSSUPPORTED 2906
 #define SC_SUPPORTS_LINE_DRAWS_FINAL 0
 #define SC_SUPPORTS_PIXEL_DIVISIONS 1
 #define SC_SUPPORTS_FRACTIONAL_STROKE_WIDTH 2
@@ -1201,7 +1208,8 @@ typedef sptr_t (*SciFnDirectStatus)(sptr_t ptr, unsigned int iMessage, uptr_t wP
 #define SC_MOD_INSERTCHECK 0x100000
 #define SC_MOD_CHANGETABSTOPS 0x200000
 #define SC_MOD_CHANGEEOLANNOTATION 0x400000
-#define SC_MODEVENTMASKALL 0x7FFFFF
+#define SC_MOD_CHANGEINLAYHINT 0x800000
+#define SC_MODEVENTMASKALL 0xFFFFFF
 #define SC_UPDATE_NONE 0x0
 #define SC_UPDATE_CONTENT 0x1
 #define SC_UPDATE_SELECTION 0x2
@@ -1350,6 +1358,16 @@ struct Sci_RangeToFormatFull {
 	struct Sci_Rectangle rc;
 	struct Sci_Rectangle rcPage;
 	struct Sci_CharacterRangeFull chrg;
+};
+
+struct Sci_InlayInfo {
+	int handle;
+	Sci_Position line;
+	Sci_Position position;
+	int style;
+	const char *text;
+	bool paddingLeft;
+	bool paddingRight;
 };
 
 #ifndef __cplusplus

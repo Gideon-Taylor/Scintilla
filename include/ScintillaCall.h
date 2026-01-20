@@ -843,6 +843,13 @@ public:
 	Scintilla::EOLAnnotationVisible EOLAnnotationGetVisible();
 	void EOLAnnotationSetStyleOffset(int style);
 	int EOLAnnotationGetStyleOffset();
+	int SetInlayHint(Scintilla::InlayInfo *info);
+	bool GetInlayHint(int hintHandle, Scintilla::InlayInfo *info);
+	void InlayHintRemove(int hintHandle);
+	void InlayHintClearLine(Line line);
+	void InlayHintClearAll();
+	Position GetInlayInfo(void *buffer, Position bufferSize);
+	bool InlayHintsSupported();
 	bool SupportsFeature(Scintilla::Supports feature);
 	Scintilla::LineCharacterIndexType LineCharacterIndex();
 	void AllocateLineCharacterIndex(Scintilla::LineCharacterIndexType lineCharacterIndex);
