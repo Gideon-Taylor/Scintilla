@@ -210,26 +210,40 @@ int CallTip::PaintContents(Surface *surfaceWindow, bool draw) {
 		}
 
 		const Chunk chunkLine(lineStart, lineStart + chunkVal.length());
-		Chunk chunkHighlight(
-			std::clamp(highlight.start, chunkLine.start, chunkLine.end),
-			std::clamp(highlight.end, chunkLine.start, chunkLine.end)
-		);
-		chunkHighlight.start -= lineStart;
-		chunkHighlight.end -= lineStart;
+
+		// Collect highlights that overlap this line, clipped and converted to line-relative offsets
+		std::vector<Chunk> lineHighlights;
+		for (const Chunk &h : highlights) {
+			const size_t hs = std::clamp(h.start, chunkLine.start, chunkLine.end);
+			const size_t he = std::clamp(h.end, chunkLine.start, chunkLine.end);
+			if (he > hs) {
+				lineHighlights.emplace_back(hs - lineStart, he - lineStart);
+			}
+		}
+		std::sort(lineHighlights.begin(), lineHighlights.end(),
+			[](const Chunk &a, const Chunk &b) noexcept { return a.start < b.start; });
 
 		rcClient.top = static_cast<XYPOSITION>(ytext - ascent - 1);
 
 		int x = insetX;     // start each line at this inset
 
-		x = DrawChunk(surfaceWindow, x,
-			chunkVal.substr(0, chunkHighlight.start),
-			ytext, rcClient, false, draw);
-		x = DrawChunk(surfaceWindow, x,
-			chunkVal.substr(chunkHighlight.start, chunkHighlight.Length()),
-			ytext, rcClient, true, draw);
-		x = DrawChunk(surfaceWindow, x,
-			chunkVal.substr(chunkHighlight.end),
-			ytext, rcClient, false, draw);
+		size_t pos = 0;
+		for (const Chunk &hl : lineHighlights) {
+			if (hl.start > pos) {
+				x = DrawChunk(surfaceWindow, x,
+					chunkVal.substr(pos, hl.start - pos),
+					ytext, rcClient, false, draw);
+			}
+			x = DrawChunk(surfaceWindow, x,
+				chunkVal.substr(hl.start, hl.Length()),
+				ytext, rcClient, true, draw);
+			pos = hl.end;
+		}
+		if (pos < chunkVal.length()) {
+			x = DrawChunk(surfaceWindow, x,
+				chunkVal.substr(pos),
+				ytext, rcClient, false, draw);
+		}
 
 		ytext += lineHeight;
 		rcClient.bottom += lineHeight;
@@ -276,7 +290,7 @@ PRectangle CallTip::CallTipStart(Sci::Position pos, Point pt, int textHeight, co
 	clickPlace = 0;
 	val = defn;
 	codePage = codePage_;
-	highlight = Chunk();
+	highlights.clear();
 	inCallTipMode = true;
 	posStartCallTip = pos;
 	font = font_;
@@ -311,13 +325,11 @@ void CallTip::CallTipCancel() noexcept {
 }
 
 void CallTip::SetHighlight(size_t start, size_t end) {
-	// Avoid flashing by checking something has really changed
-	if ((start != highlight.start) || (end != highlight.end)) {
-		highlight.start = start;
-		highlight.end = (end > start) ? end : start;
-		if (wCallTip.Created()) {
-			wCallTip.InvalidateAll();
-		}
+	if (end > start) {
+		highlights.emplace_back(start, end);
+	}
+	if (wCallTip.Created()) {
+		wCallTip.InvalidateAll();
 	}
 }
 
