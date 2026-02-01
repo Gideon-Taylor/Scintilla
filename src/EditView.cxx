@@ -454,6 +454,33 @@ void EditView::LayoutLine(const EditModel &model, Sci::Line line, Surface *surfa
 		ll->chars[numCharsInLine] = 0;   // Also triggers processing in the loops as this is a control character
 		ll->styles[numCharsInLine] = styleByteLast;	// For eolFilled
 
+		ll->inlayHints.clear();
+		const std::vector<InlayHint>* lineHints = model.pdoc->InlayHintsForLine(line);
+		if (lineHints && !lineHints->empty()) {
+			ll->inlayHints.reserve(lineHints->size());
+			for (const InlayHint& hint : *lineHints) {
+				if (hint.position < 0 || hint.position > numCharsInLine) {
+					continue;
+				}
+				const int styleNumber = (hint.style >= 0 && static_cast<size_t>(hint.style) < vstyle.styles.size()) ? hint.style : STYLE_DEFAULT;
+				FontAlias fontHint = vstyle.styles[styleNumber].font;
+				const std::string_view hintText(hint.text);
+				InlayHintLayout hintLayout;
+				hintLayout.position = hint.position;
+				hintLayout.text = hint.text;
+				hintLayout.style = styleNumber;
+				hintLayout.textWidth = surface->WidthText(fontHint, hintText);
+				hintLayout.paddingLeft = hint.paddingLeft ? vstyle.spaceWidth * 0.5f : 0.0f;
+				hintLayout.paddingRight = hint.paddingRight ? vstyle.spaceWidth * 0.5f : 0.0f;
+				hintLayout.width = hintLayout.textWidth + hintLayout.paddingLeft + hintLayout.paddingRight;
+				ll->inlayHints.push_back(std::move(hintLayout));
+			}
+			std::sort(ll->inlayHints.begin(), ll->inlayHints.end(),
+				[](const InlayHintLayout& a, const InlayHintLayout& b) noexcept {
+					return a.position < b.position;
+				});
+		}
+
 		// Layout the line, determining the position of each character,
 		// with an extra element at the end for the end of the line.
 		ll->positions[0] = 0;
@@ -503,6 +530,22 @@ void EditView::LayoutLine(const EditModel &model, Sci::Line line, Surface *surfa
 		if (lastSegItalics) {
 			ll->positions[numCharsInLine] += vstyle.lastSegItalicsOffset;
 		}
+
+		if (!ll->inlayHints.empty()) {
+			XYPOSITION hintOffset = 0.0;
+			size_t hintIndex = 0;
+			for (int i = 0; i <= numCharsInLine; i++) {
+				const XYPOSITION basePosition = ll->positions[i];
+				while ((hintIndex < ll->inlayHints.size()) && (ll->inlayHints[hintIndex].position == i)) {
+					InlayHintLayout& hint = ll->inlayHints[hintIndex];
+					hint.xStart = basePosition + hintOffset;
+					hintOffset += hint.width;
+					hintIndex++;
+				}
+				ll->positions[i] = basePosition + hintOffset;
+			}
+		}
+
 		ll->numCharsInLine = numCharsInLine;
 		ll->numCharsBeforeEOL = numCharsBeforeEOL;
 		ll->validity = LineLayout::ValidLevel::positions;
@@ -729,7 +772,7 @@ SelectionPosition EditView::SPositionFromLocation(Surface *surface, const EditMo
 				positionInLine = slLayout->PositionFromX(static_cast<XYPOSITION>(pt.x), charPosition) +
 					rangeSubLine.start;
 			} else {
-				positionInLine = ll->FindPositionFromX(static_cast<XYPOSITION>(pt.x + subLineStart),
+				positionInLine = ll->FindPositionFromXWithInlayHints(static_cast<XYPOSITION>(pt.x + subLineStart),
 					rangeSubLine, charPosition);
 			}
 			if (positionInLine < rangeSubLine.end) {
@@ -766,7 +809,7 @@ SelectionPosition EditView::SPositionFromLineX(Surface *surface, const EditModel
 		LayoutLine(model, lineDoc, surface, vs, ll, model.wrapWidth);
 		const Range rangeSubLine = ll->SubLineRange(0, LineLayout::Scope::visibleOnly);
 		const XYPOSITION subLineStart = ll->positions[rangeSubLine.start];
-		const Sci::Position positionInLine = ll->FindPositionFromX(x + subLineStart, rangeSubLine, false);
+		const Sci::Position positionInLine = ll->FindPositionFromXWithInlayHints(x + subLineStart, rangeSubLine, false);
 		if (positionInLine < rangeSubLine.end) {
 			return SelectionPosition(model.pdoc->MovePositionOutsideChar(positionInLine + posLineStart, 1));
 		}
@@ -1367,6 +1410,79 @@ void EditView::DrawEOLAnnotationText(Surface *surface, const EditModel &model, c
 			surface->LineTo(ircBox.right, ircBox.top);
 			surface->MoveTo(ircBox.left, ircBox.bottom - 1);
 			surface->LineTo(ircBox.right, ircBox.bottom - 1);
+		}
+	}
+}
+
+void EditView::DrawInlayHints(Surface *surface, const EditModel & /*model*/, const ViewStyle &vsDraw, const LineLayout *ll,
+	Sci::Line /*line*/, int xStart, PRectangle rcLine, int subLine, XYACCUMULATOR subLineStart, DrawPhase phase) {
+	if (ll->inlayHints.empty()) {
+		return;
+	}
+	const Range lineRange = ll->SubLineRange(subLine, LineLayout::Scope::visibleOnly);
+	const XYPOSITION ybase = rcLine.top + vsDraw.maxAscent;
+
+	// Precompute total widths per position so we can derive each hint's
+	// starting X from current character positions without relying on cached
+	// xStart stored during layout.
+	// Note: positions[] already includes cumulative offsets for hints with
+	// positions less than or equal to an index, so the first hint at pos P
+	// should start at positions[P] - totalWidthAtPos[P].
+	std::vector<XYPOSITION> totalWidthAtPos;
+	if (!ll->inlayHints.empty()) {
+		Sci::Position maxPos = 0;
+		for (const InlayHintLayout &h : ll->inlayHints) {
+			if (h.position > maxPos) maxPos = h.position;
+		}
+		totalWidthAtPos.assign(maxPos + 1, 0.0f);
+		for (const InlayHintLayout &h : ll->inlayHints) {
+			if (h.position >= 0 && h.position < static_cast<Sci::Position>(totalWidthAtPos.size()))
+				totalWidthAtPos[h.position] += h.width;
+		}
+	}
+
+	// Track per-position progress while iterating sorted hints
+	std::vector<XYPOSITION> consumedAtPos = totalWidthAtPos;
+	for (const InlayHintLayout& hint : ll->inlayHints) {
+		// Only draw hints whose position lies within this subline's visible range.
+		// 'end' is exclusive for visible characters, so exclude position == end.
+		if (hint.position < lineRange.start || hint.position >= lineRange.end) {
+			continue;
+		}
+		if (hint.text.empty()) {
+			continue;
+		}
+		FontAlias fontHint = vsDraw.styles[hint.style].font;
+		const ColourDesired backHint = vsDraw.styles[hint.style].back;
+		const ColourDesired foreHint = vsDraw.styles[hint.style].fore;
+		XYPOSITION xBase = 0.0f;
+		if (!totalWidthAtPos.empty() && hint.position >= 0 && hint.position < static_cast<Sci::Position>(totalWidthAtPos.size())) {
+			const XYPOSITION posX = ll->positions[hint.position];
+			const XYPOSITION remainingAtPos = consumedAtPos[hint.position];
+			const XYPOSITION totalAtPos = totalWidthAtPos[hint.position];
+			// Start for this hint = position X minus remaining widths for this position
+			// (which, after subtracting, accumulates from left to right as we consume).
+			xBase = posX - remainingAtPos;
+			consumedAtPos[hint.position] -= hint.width;
+		} else {
+			// Fallback to stored xStart if per-position data not available
+			xBase = hint.xStart;
+		}
+		const XYPOSITION xHint = static_cast<XYPOSITION>(xStart) + xBase - static_cast<XYPOSITION>(subLineStart);
+		PRectangle rcHint = rcLine;
+		rcHint.left = xHint;
+		rcHint.right = xHint + hint.width;
+		// Fill background in back phase
+		if (phase & drawBack) {
+			surface->FillRectangle(rcHint, backHint);
+		}
+		// Draw text transparently over the background in text phase
+		if (phase & drawText) {
+			PRectangle rcText = rcLine;
+			rcText.left = xHint + hint.paddingLeft;
+			rcText.right = rcText.left + hint.textWidth;
+			const std::string_view hintText(hint.text);
+			surface->DrawTextTransparent(rcText, fontHint, ybase, hintText, foreHint);
 		}
 	}
 }
@@ -1973,13 +2089,44 @@ void EditView::DrawForeground(Surface *surface, const EditModel &model, const Vi
 			} else {
 				// Normal text display
 				if (vsDraw.styles[styleMain].visible) {
-					const std::string_view text(&ll->chars[ts.start], i - ts.start + 1);
-					if (phasesDraw != phasesOne) {
-						surface->DrawTextTransparent(rcSegment, textFont,
-							rcSegment.top + vsDraw.maxAscent, text, textFore);
-					} else {
-						surface->DrawTextNoClip(rcSegment, textFont,
-							rcSegment.top + vsDraw.maxAscent, text, textFore, textBack);
+					// Split drawing at inlay hint boundaries to ensure text after an inlay
+					// starts at the shifted x for that position. Otherwise, drawing one
+					// contiguous run would ignore the gap within the run.
+					Sci::Position segStart = ts.start;
+					const Sci::Position segEnd = ts.end();
+					// Iterate inlay positions that fall within (segStart, segEnd]
+					for (const InlayHintLayout &hint : ll->inlayHints) {
+						if (hint.position <= segStart) continue;
+						if (hint.position > segEnd) break;
+						// Draw up to just before hint.position
+						if (hint.position > segStart) {
+							PRectangle rcRun = rcLine;
+							rcRun.left = ll->positions[segStart] + xStart - static_cast<XYPOSITION>(subLineStart);
+							rcRun.right = ll->positions[hint.position] + xStart - static_cast<XYPOSITION>(subLineStart);
+							const std::string_view runText(&ll->chars[segStart], hint.position - segStart);
+							if (phasesDraw != phasesOne) {
+								surface->DrawTextTransparent(rcRun, textFont,
+									rcRun.top + vsDraw.maxAscent, runText, textFore);
+							} else {
+								surface->DrawTextNoClip(rcRun, textFont,
+									rcRun.top + vsDraw.maxAscent, runText, textFore, textBack);
+							}
+						}
+						segStart = hint.position;
+					}
+					// Draw any remaining tail
+					if (segStart < segEnd) {
+						PRectangle rcRun = rcLine;
+						rcRun.left = ll->positions[segStart] + xStart - static_cast<XYPOSITION>(subLineStart);
+						rcRun.right = ll->positions[segEnd] + xStart - static_cast<XYPOSITION>(subLineStart);
+						const std::string_view runText(&ll->chars[segStart], segEnd - segStart);
+						if (phasesDraw != phasesOne) {
+							surface->DrawTextTransparent(rcRun, textFont,
+								rcRun.top + vsDraw.maxAscent, runText, textFore);
+						} else {
+							surface->DrawTextNoClip(rcRun, textFont,
+								rcRun.top + vsDraw.maxAscent, runText, textFore, textBack);
+						}
 					}
 				}
 				if (vsDraw.viewWhitespace != wsInvisible ||
@@ -2127,6 +2274,7 @@ void EditView::DrawLine(Surface *surface, const EditModel &model, const ViewStyl
 		if (phase & drawBack) {
 			DrawBackground(surface, model, vsDraw, ll, rcLine, lineRange, posLineStart, xStart,
 				subLine, background);
+			DrawInlayHints(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, drawBack);
 			DrawFoldDisplayText(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, drawBack);
 			DrawEOLAnnotationText(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, drawBack);
 			phase = static_cast<DrawPhase>(phase & ~drawBack);	// Remove drawBack to not draw again in DrawFoldDisplayText
@@ -2145,6 +2293,11 @@ void EditView::DrawLine(Surface *surface, const EditModel &model, const ViewStyl
 	}
 
 	if (phase & drawText) {
+		// In single-phase drawing, paint inlay backgrounds before main text so
+		// their background does not overlay already-drawn text.
+		if (phasesDraw == phasesOne) {
+			DrawInlayHints(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, drawBack);
+		}
 		DrawForeground(surface, model, vsDraw, ll, lineVisible, rcLine, lineRange, posLineStart, xStart,
 			subLine, background);
 	}
@@ -2158,6 +2311,15 @@ void EditView::DrawLine(Surface *surface, const EditModel &model, const ViewStyl
 			lineRangeIncludingEnd.end, false, tabWidthMinimumPixels);
 	}
 
+	// Draw inlay content at appropriate phase:
+	// - In multi-phase mode, 'phase' will include drawText here but not drawBack, as
+	//   backgrounds were drawn earlier.
+	// - In single-phase mode, only draw the text here as the background was drawn before text.
+	if (phasesDraw == phasesOne) {
+		DrawInlayHints(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, drawText);
+	} else {
+		DrawInlayHints(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, phase);
+	}
 	DrawFoldDisplayText(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, phase);
 	DrawEOLAnnotationText(surface, model, vsDraw, ll, line, xStart, rcLine, subLine, subLineStart, phase);
 

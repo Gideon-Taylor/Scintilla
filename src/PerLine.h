@@ -116,6 +116,66 @@ public:
 	Sci::Line GetMaxLineState() const noexcept;
 };
 
+struct InlayHint {
+	int handle;                   // Unique handle for this hint
+	Sci::Position position;      // Position in line where hint appears (0-based)
+	std::string text;             // Hint text to display
+	int style;                    // Style number for rendering
+	double width;             // Cached width (calculated during layout)
+	bool paddingLeft;             // Add visual padding before hint
+	bool paddingRight;            // Add visual padding after hint
+
+	InlayHint(int hdl, Sci::Position pos, const char* txt, int sty)
+		: handle(hdl), position(pos), text(txt), style(sty), width(0.0),
+		paddingLeft(true), paddingRight(true) {
+	}
+
+	// For sorting by position
+	bool operator<(const InlayHint& other) const {
+		return position < other.position;
+	}
+};
+
+class LineInlayHints : public PerLine {
+	// Store hints per-line as sorted vectors (sorted by position)
+	SplitVector<std::unique_ptr<std::vector<InlayHint>>> hints;
+	/// Handles are allocated sequentially and should never have to be reused as 32 bit ints are very big.
+	int handleCurrent;
+
+public:
+	LineInlayHints();
+	// Deleted copy/move constructors (following Scintilla patterns)
+	LineInlayHints(const LineInlayHints&) = delete;
+	LineInlayHints(LineInlayHints&&) = delete;
+	void operator=(const LineInlayHints&) = delete;
+	void operator=(LineInlayHints&&) = delete;
+	~LineInlayHints() override;
+
+	// PerLine interface
+	void Init() override;
+	void InsertLine(Sci::Line line) override;
+	void InsertLines(Sci::Line line, Sci::Line lines) override;
+	void RemoveLine(Sci::Line line) override;
+
+	// Core operations
+	int SetHint(Sci::Line line, Sci::Position position, const char* text, int style, bool paddingLeft, bool paddingRight, int handle);
+	bool GetHint(int hintHandle, Sci::Line &line, Sci::Position &position, int &style, const char *&text, bool &paddingLeft, bool &paddingRight) const noexcept;
+	void RemoveHint(int hintHandle);
+	void RemoveHintsInRange(Sci::Line line, Sci::Position start, Sci::Position end);
+	void ClearLine(Sci::Line line);
+	void ClearAll();
+
+	// Query operations
+	const std::vector<InlayHint>* GetHints(Sci::Line line) const noexcept;
+	Sci::Position GetInlayInfo(void *buffer, Sci::Position bufferSize) const;
+	bool HasHints(Sci::Line line) const noexcept;
+
+	// Position adjustment (when text inserted/deleted)
+	void AdjustHints(Sci::Line line, Sci::Position position, Sci::Position delta);
+	void MoveHintsAfterInsert(Sci::Line line, Sci::Position position, Sci::Line linesAdded, Sci::Position lastSegmentLength);
+	void MergeLines(Sci::Line lineStart, Sci::Position positionStart, Sci::Line lineEnd, Sci::Position positionEnd);
+};
+
 class LineAnnotation : public PerLine {
 	SplitVector<std::unique_ptr<char []>> annotations;
 public:
