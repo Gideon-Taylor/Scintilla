@@ -22,7 +22,7 @@ struct Chunk {
 /**
  */
 class CallTip {
-	Chunk highlight;    // character offset to start and end of highlighted text
+	std::vector<Chunk> highlights;    // character offsets to start and end of highlighted text ranges
 	std::string val;
 	std::shared_ptr<Font> font;
 	PRectangle rectUp;      // rectangle of last up angle in the tip
