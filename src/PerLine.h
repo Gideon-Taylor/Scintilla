@@ -167,7 +167,7 @@ public:
 
 	// Query operations
 	const std::vector<InlayHint>* GetHints(Sci::Line line) const noexcept;
-	Sci::Position GetInlayInfo(void *buffer, Sci::Position bufferSize) const;
+	void SetInlayInfo(const Sci_InlayHintInfo *newHints, size_t count, bool clearAll);
 	bool HasHints(Sci::Line line) const noexcept;
 
 	// Position adjustment (when text inserted/deleted)

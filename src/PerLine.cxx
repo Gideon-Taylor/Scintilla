@@ -15,6 +15,7 @@
 #include <vector>
 #include <forward_list>
 #include <algorithm>
+#include <map>
 #include <memory>
 
 #include "Platform.h"
@@ -709,46 +710,78 @@ const std::vector<InlayHint>* LineInlayHints::GetHints(Sci::Line line) const noe
 	return nullptr;
 }
 
-Sci::Position LineInlayHints::GetInlayInfo(void *buffer, Sci::Position bufferSize) const {
-	const size_t structSize = sizeof(Sci_InlayInfo);
-	size_t totalSize = 0;
-
-	// Calculate total size needed
-	for (Sci::Line line = 0; line < hints.Length(); line++) {
-		if (hints[line]) {
-			totalSize += hints[line]->size() * structSize;
+void LineInlayHints::SetInlayInfo(const Sci_InlayHintInfo *newHints, size_t count, bool clearAll) {
+	if (clearAll) {
+		ClearAll();
+		handleCurrent = 0;
+		for (size_t i = 0; i < count; i++) {
+			const Sci_InlayHintInfo &info = newHints[i];
+			const Sci::Line line = static_cast<Sci::Line>(info.line);
+			hints.EnsureLength(line + 1);
+			if (!hints[line]) {
+				hints[line] = std::make_unique<std::vector<InlayHint>>();
+			}
+			const int hintHandle = ++handleCurrent;
+			InlayHint hint(hintHandle, static_cast<Sci::Position>(info.position),
+				info.text ? info.text : "", info.style);
+			hint.paddingLeft = info.paddingLeft;
+			hint.paddingRight = info.paddingRight;
+			auto it = std::lower_bound(hints[line]->begin(), hints[line]->end(), hint);
+			hints[line]->insert(it, hint);
 		}
+		return;
 	}
 
-	// If buffer is NULL, return required size
-	if (!buffer) {
-		return static_cast<Sci::Position>(totalSize);
-	}
-
-	// Write to buffer
-	Sci_InlayInfo *dest = static_cast<Sci_InlayInfo *>(buffer);
-	size_t written = 0;
-
+	// Delta/merge mode: build map of existing hints for handle reuse
+	struct HintKey {
+		Sci::Line line;
+		Sci::Position position;
+		std::string text;
+		bool operator<(const HintKey &other) const {
+			if (line != other.line) return line < other.line;
+			if (position != other.position) return position < other.position;
+			return text < other.text;
+		}
+	};
+	std::map<HintKey, int> existingHandles;
 	for (Sci::Line line = 0; line < hints.Length(); line++) {
 		if (hints[line]) {
 			for (const InlayHint &hint : *hints[line]) {
-				if (written + structSize > static_cast<size_t>(bufferSize)) {
-					return static_cast<Sci::Position>(written);
-				}
-				dest->handle = hint.handle;
-				dest->line = line;
-				dest->position = hint.position;
-				dest->style = hint.style;
-				dest->text = hint.text.c_str();
-				dest->paddingLeft = hint.paddingLeft;
-				dest->paddingRight = hint.paddingRight;
-				dest++;
-				written += structSize;
+				existingHandles[{line, hint.position, hint.text}] = hint.handle;
 			}
 		}
 	}
 
-	return static_cast<Sci::Position>(written);
+	// Clear all existing hints
+	ClearAll();
+
+	// Re-add with handle reuse
+	for (size_t i = 0; i < count; i++) {
+		const Sci_InlayHintInfo &info = newHints[i];
+		const Sci::Line line = static_cast<Sci::Line>(info.line);
+		hints.EnsureLength(line + 1);
+		if (!hints[line]) {
+			hints[line] = std::make_unique<std::vector<InlayHint>>();
+		}
+
+		const HintKey key = {line, static_cast<Sci::Position>(info.position),
+			info.text ? info.text : ""};
+		auto found = existingHandles.find(key);
+		int hintHandle;
+		if (found != existingHandles.end()) {
+			hintHandle = found->second;
+			existingHandles.erase(found);
+		} else {
+			hintHandle = ++handleCurrent;
+		}
+
+		InlayHint hint(hintHandle, static_cast<Sci::Position>(info.position),
+			info.text ? info.text : "", info.style);
+		hint.paddingLeft = info.paddingLeft;
+		hint.paddingRight = info.paddingRight;
+		auto it = std::lower_bound(hints[line]->begin(), hints[line]->end(), hint);
+		hints[line]->insert(it, hint);
+	}
 }
 
 bool LineInlayHints::HasHints(Sci::Line line) const noexcept {

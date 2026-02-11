@@ -2501,8 +2501,11 @@ void Document::InlayHintClearAll() {
 	NotifyModified(mh);
 }
 
-Sci::Position Document::GetInlayInfo(void *buffer, Sci::Position bufferSize) const {
-	return InlayHints()->GetInlayInfo(buffer, bufferSize);
+void Document::SetInlayInfo(const Sci_InlayHintInfo *hints, size_t count, bool clearAll) {
+	InlayHints()->SetInlayInfo(hints, count, clearAll);
+	DocModification mh(SC_MOD_CHANGEINLAYHINT);
+	mh.line = -1;
+	NotifyModified(mh);
 }
 
 const std::vector<InlayHint>* Document::InlayHintsForLine(Sci::Line line) const noexcept {

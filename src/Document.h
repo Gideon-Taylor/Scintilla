@@ -499,7 +499,7 @@ public:
 	void InlayHintRemove(int hintHandle);
 	void InlayHintClearLine(Sci::Line line);
 	void InlayHintClearAll();
-	Sci::Position GetInlayInfo(void *buffer, Sci::Position bufferSize) const;
+	void SetInlayInfo(const Sci_InlayHintInfo *hints, size_t count, bool clearAll);
 	const std::vector<InlayHint>* InlayHintsForLine(Sci::Line line) const noexcept;
 
 	bool AddWatcher(DocWatcher *watcher, void *userData);

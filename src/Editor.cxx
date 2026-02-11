@@ -8159,18 +8159,18 @@ sptr_t Editor::WndProc(unsigned int iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case SCI_SETINLAYHINT:
 		{
-			const Sci_InlayInfo *info = static_cast<const Sci_InlayInfo *>(PtrFromUPtr(wParam));
+			const Sci_InlayHintInfo *info = static_cast<const Sci_InlayHintInfo *>(PtrFromUPtr(wParam));
 			if (info) {
 				return pdoc->SetInlayHint(static_cast<Sci::Line>(info->line),
 					static_cast<Sci::Position>(info->position), info->text, info->style,
-					info->paddingLeft, info->paddingRight, info->handle);
+					info->paddingLeft, info->paddingRight, 0);
 			}
 			return -1;
 		}
 
 	case SCI_GETINLAYHINT:
 		{
-			Sci_InlayInfo *info = static_cast<Sci_InlayInfo *>(PtrFromSPtr(lParam));
+			Sci_InlayHintInfo *info = static_cast<Sci_InlayHintInfo *>(PtrFromSPtr(lParam));
 			if (info) {
 				Sci::Line line;
 				Sci::Position position;
@@ -8178,7 +8178,6 @@ sptr_t Editor::WndProc(unsigned int iMessage, uptr_t wParam, sptr_t lParam) {
 				const char *text;
 				bool paddingLeft, paddingRight;
 				if (pdoc->GetInlayHint(static_cast<int>(wParam), line, position, style, text, paddingLeft, paddingRight)) {
-					info->handle = static_cast<int>(wParam);
 					info->line = line;
 					info->position = position;
 					info->style = style;
@@ -8203,8 +8202,14 @@ sptr_t Editor::WndProc(unsigned int iMessage, uptr_t wParam, sptr_t lParam) {
 		pdoc->InlayHintClearAll();
 		break;
 
-	case SCI_GETINLAYINFO:
-		return pdoc->GetInlayInfo(PtrFromUPtr(wParam), static_cast<Sci::Position>(lParam));
+	case SCI_SETINLAYINFO:
+		{
+			const Sci_InlayHintSet *inlaySet = static_cast<const Sci_InlayHintSet *>(PtrFromUPtr(wParam));
+			if (inlaySet && inlaySet->hints) {
+				pdoc->SetInlayInfo(inlaySet->hints, inlaySet->count, lParam > 0);
+			}
+			break;
+		}
 
 	case SCI_INLAYHINTSSUPPORTED:
 		return 1;

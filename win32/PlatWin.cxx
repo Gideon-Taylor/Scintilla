@@ -3486,7 +3486,7 @@ void Platform::DebugPrintf(const char *, ...) {
 }
 #endif
 
-static bool assertionPopUps = true;
+static bool assertionPopUps = false;
 
 bool Platform::ShowAssertionPopUps(bool assertionPopUps_) {
 	const bool ret = assertionPopUps;
@@ -3509,8 +3509,8 @@ void Platform::Assert(const char *c, const char *file, int line) {
 		}
 	} else {
 		Platform::DebugDisplay(buffer);
-		::DebugBreak();
-		abort();
+		//::DebugBreak();
+		//abort();
 	}
 }
 
