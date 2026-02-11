@@ -30,7 +30,13 @@ using namespace Scintilla;
 
 
 static bool IsVBComment(Accessor &styler, Sci_Position pos, Sci_Position len) {
-	return len > 0 && styler[pos] == '\'';
+	if (len >= 2) {
+		char ch = styler[pos];
+		char chNext = styler[pos + 1];
+		if (ch == '/' && (chNext == '*' || chNext == '+')) return true;
+		if (ch == '<' && chNext == '*') return true;
+	}
+	return false;
 }
 
 static inline bool IsTypeCharacter(int ch) {
@@ -40,7 +46,7 @@ static inline bool IsTypeCharacter(int ch) {
 // Extended to accept accented characters
 static inline bool IsAWordChar(int ch) {
 	return ch >= 0x80 ||
-	       (isalnum(ch) || ch == '.' || ch == '_');
+	       (isalnum(ch) || ch == '.' || ch == '_' || ch == '-');
 }
 
 static inline bool IsAWordStart(int ch) {
@@ -68,10 +74,25 @@ static void ColouriseVBDoc(Sci_PositionU startPos, Sci_Position length, int init
 
 	int visibleChars = 0;
 	int fileNbDigits = 0;
+	int commentType = 0; // 0=none, 1=/* */, 2=<* *>, 3=/+ +/
 
 	// Do not leak onto next line
 	if (initStyle == SCE_B_STRINGEOL || initStyle == SCE_B_COMMENT || initStyle == SCE_B_PREPROCESSOR) {
 		initStyle = SCE_B_DEFAULT;
+	}
+
+	// If starting inside a block comment, find the true start of the comment
+	// by scanning back through styled characters, then read the opener
+	if (initStyle == SCE_B_COMMENTBLOCK) {
+		Sci_Position pos = startPos;
+		while (pos > 0 && styler.StyleAt(pos - 1) == SCE_B_COMMENTBLOCK) {
+			pos--;
+		}
+		char ch = styler[pos];
+		char chN = styler[pos + 1];
+		if (ch == '/' && chN == '*') commentType = 1;
+		else if (ch == '<' && chN == '*') commentType = 2;
+		else if (ch == '/' && chN == '+') commentType = 3;
 	}
 
 	StyleContext sc(startPos, length, initStyle, styler);
@@ -175,11 +196,29 @@ static void ColouriseVBDoc(Sci_PositionU startPos, Sci_Position length, int init
 			} else if (sc.ch == '#') {
 				sc.ForwardSetState(SCE_B_DEFAULT);
 			}
+		} else if (sc.state == SCE_B_COMMENTBLOCK) {
+			if ((commentType == 1 && sc.ch == '*' && sc.chNext == '/') ||
+			    (commentType == 2 && sc.ch == '*' && sc.chNext == '>') ||
+			    (commentType == 3 && sc.ch == '+' && sc.chNext == '/')) {
+				sc.Forward();
+				sc.ForwardSetState(SCE_B_DEFAULT);
+				commentType = 0;
+			}
 		}
 
 		if (sc.state == SCE_B_DEFAULT) {
-			if (sc.ch == '\'') {
-				sc.SetState(SCE_B_COMMENT);
+			if (sc.ch == '/' && sc.chNext == '*') {
+				sc.SetState(SCE_B_COMMENTBLOCK);
+				commentType = 1;
+				sc.Forward();
+			} else if (sc.ch == '<' && sc.chNext == '*') {
+				sc.SetState(SCE_B_COMMENTBLOCK);
+				commentType = 2;
+				sc.Forward();
+			} else if (sc.ch == '/' && sc.chNext == '+') {
+				sc.SetState(SCE_B_COMMENTBLOCK);
+				commentType = 3;
+				sc.Forward();
 			} else if (sc.ch == '\"') {
 				sc.SetState(SCE_B_STRING);
 			} else if (sc.ch == '#' && visibleChars == 0) {
