@@ -28,6 +28,7 @@
 #endif
 
 #include "ScintillaTypes.h"
+#include "ScintillaStructures.h"
 #include "ILoader.h"
 #include "ILexer.h"
 
@@ -2696,8 +2697,11 @@ void Document::InlayHintClearAll() {
 	NotifyModified(mh);
 }
 
-Sci::Position Document::GetInlayInfo(void *buffer, Sci::Position bufferSize) const {
-	return InlayHints()->GetInlayInfo(buffer, bufferSize);
+void Document::SetInlayInfo(const Scintilla::InlayHintInfo *infoArray, size_t count, bool clearAll) {
+	InlayHints()->SetInlayInfo(infoArray, count, clearAll);
+	DocModification mh(ModificationFlags::ChangeInlayHint);
+	mh.line = -1;
+	NotifyModified(mh);
 }
 
 const std::vector<InlayHint>* Document::InlayHintsForLine(Sci::Line line) const noexcept {

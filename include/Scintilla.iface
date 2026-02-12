@@ -3173,9 +3173,10 @@ fun void InlayHintClearLine=2903(line line,)
 # Clear all inlay hints from the document
 fun void InlayHintClearAll=2904(,)
 
-# Get information about all inlay hints. If buffer is NULL, returns size needed.
-# Otherwise writes InlayInfo structs to buffer and returns bytes written.
-fun position GetInlayInfo=2905(pointer buffer, position bufferSize)
+# Atomically set all inlay hints for the document. Pass InlayHintSet* via wParam.
+# lParam > 0 means clear all existing hints first; lParam == 0 uses delta/merge mode
+# preserving handles for hints that match by (line, position, text).
+fun void SetInlayInfo=2905(pointer inlayHintSet, int clearAll)
 
 # Check if inlay hints are supported by this version of Scintilla
 get bool InlayHintsSupported=2906(,)

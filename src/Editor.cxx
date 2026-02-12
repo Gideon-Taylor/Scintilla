@@ -8729,18 +8729,18 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 
 	case Message::SetInlayHint:
 		{
-			const Scintilla::InlayInfo *info = static_cast<const Scintilla::InlayInfo *>(PtrFromUPtr(wParam));
+			const Scintilla::InlayHintInfo *info = static_cast<const Scintilla::InlayHintInfo *>(PtrFromUPtr(wParam));
 			if (info) {
 				return pdoc->SetInlayHint(static_cast<Sci::Line>(info->line),
 					static_cast<Sci::Position>(info->position), info->text, info->style,
-					info->paddingLeft, info->paddingRight, info->handle);
+					info->paddingLeft, info->paddingRight, 0);
 			}
 			return -1;
 		}
 
 	case Message::GetInlayHint:
 		{
-			Scintilla::InlayInfo *info = static_cast<Scintilla::InlayInfo *>(PtrFromSPtr(lParam));
+			Scintilla::InlayHintInfo *info = static_cast<Scintilla::InlayHintInfo *>(PtrFromSPtr(lParam));
 			if (info) {
 				Sci::Line line;
 				Sci::Position position;
@@ -8748,7 +8748,6 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 				const char *text;
 				bool paddingLeft, paddingRight;
 				if (pdoc->GetInlayHint(static_cast<int>(wParam), line, position, style, text, paddingLeft, paddingRight)) {
-					info->handle = static_cast<int>(wParam);
 					info->line = line;
 					info->position = position;
 					info->style = style;
@@ -8773,8 +8772,14 @@ sptr_t Editor::WndProc(Message iMessage, uptr_t wParam, sptr_t lParam) {
 		pdoc->InlayHintClearAll();
 		break;
 
-	case Message::GetInlayInfo:
-		return pdoc->GetInlayInfo(PtrFromUPtr(wParam), static_cast<Sci::Position>(lParam));
+	case Message::SetInlayInfo:
+		{
+			const Scintilla::InlayHintSet *hintSet = static_cast<const Scintilla::InlayHintSet *>(PtrFromUPtr(wParam));
+			if (hintSet && hintSet->hints) {
+				pdoc->SetInlayInfo(hintSet->hints, hintSet->count, lParam > 0);
+			}
+			break;
+		}
 
 	case Message::InlayHintsSupported:
 		return 1;

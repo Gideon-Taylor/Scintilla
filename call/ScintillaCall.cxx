@@ -3291,11 +3291,11 @@ int ScintillaCall::EOLAnnotationGetStyleOffset() {
 	return static_cast<int>(Call(Message::EOLAnnotationGetStyleOffset));
 }
 
-int ScintillaCall::SetInlayHint(Scintilla::InlayInfo *info) {
+int ScintillaCall::SetInlayHint(Scintilla::InlayHintInfo *info) {
 	return static_cast<int>(Call(Message::SetInlayHint, reinterpret_cast<uintptr_t>(info), 0));
 }
 
-bool ScintillaCall::GetInlayHint(int hintHandle, Scintilla::InlayInfo *info) {
+bool ScintillaCall::GetInlayHint(int hintHandle, Scintilla::InlayHintInfo *info) {
 	return Call(Message::GetInlayHint, hintHandle, reinterpret_cast<intptr_t>(info));
 }
 
@@ -3311,8 +3311,8 @@ void ScintillaCall::InlayHintClearAll() {
 	Call(Message::InlayHintClearAll);
 }
 
-Position ScintillaCall::GetInlayInfo(void *buffer, Position bufferSize) {
-	return Call(Message::GetInlayInfo, reinterpret_cast<uintptr_t>(buffer), bufferSize);
+void ScintillaCall::SetInlayInfo(Scintilla::InlayHintSet *hintSet, int clearAll) {
+	Call(Message::SetInlayInfo, reinterpret_cast<uintptr_t>(hintSet), clearAll);
 }
 
 bool ScintillaCall::InlayHintsSupported() {
