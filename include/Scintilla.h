@@ -1184,7 +1184,7 @@ typedef sptr_t (*SciFnDirectStatus)(sptr_t ptr, unsigned int iMessage, uptr_t wP
 #define SCI_INLAYHINTREMOVE 2902
 #define SCI_INLAYHINTCLEARLINE 2903
 #define SCI_INLAYHINTCLEARALL 2904
-#define SCI_GETINLAYINFO 2905
+#define SCI_SETINLAYINFO 2905
 #define SCI_INLAYHINTSSUPPORTED 2906
 #define SC_SUPPORTS_LINE_DRAWS_FINAL 0
 #define SC_SUPPORTS_PIXEL_DIVISIONS 1
@@ -1411,14 +1411,18 @@ struct Sci_RangeToFormatFull {
 	struct Sci_CharacterRangeFull chrg;
 };
 
-struct Sci_InlayInfo {
-	int handle;
+struct Sci_InlayHintInfo {
 	Sci_Position line;
 	Sci_Position position;
-	int style;
 	const char *text;
+	int style;
 	bool paddingLeft;
 	bool paddingRight;
+};
+
+struct Sci_InlayHintSet {
+	size_t count;
+	const struct Sci_InlayHintInfo *hints;
 };
 
 #ifndef __cplusplus

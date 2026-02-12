@@ -14,6 +14,8 @@
 namespace Scintilla {
 
 enum class Message;	// Declare in case ScintillaMessages.h not included
+struct InlayHintInfo;	// Declare in case ScintillaStructures.h not included
+struct InlayHintSet;
 
 // Declare in case ScintillaStructures.h not included
 struct TextRangeFull;
@@ -887,12 +889,12 @@ public:
 	Scintilla::EOLAnnotationVisible EOLAnnotationGetVisible();
 	void EOLAnnotationSetStyleOffset(int style);
 	int EOLAnnotationGetStyleOffset();
-	int SetInlayHint(Scintilla::InlayInfo *info);
-	bool GetInlayHint(int hintHandle, Scintilla::InlayInfo *info);
+	int SetInlayHint(Scintilla::InlayHintInfo *info);
+	bool GetInlayHint(int hintHandle, Scintilla::InlayHintInfo *info);
 	void InlayHintRemove(int hintHandle);
 	void InlayHintClearLine(Line line);
 	void InlayHintClearAll();
-	Position GetInlayInfo(void *buffer, Position bufferSize);
+	void SetInlayInfo(Scintilla::InlayHintSet *hintSet, int clearAll);
 	bool InlayHintsSupported();
 	bool SupportsFeature(Scintilla::Supports feature);
 	Scintilla::LineCharacterIndexType LineCharacterIndex();

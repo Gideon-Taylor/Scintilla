@@ -16,6 +16,7 @@
 #include <forward_list>
 #include <optional>
 #include <algorithm>
+#include <map>
 #include <memory>
 
 #include "ScintillaTypes.h"
@@ -717,46 +718,80 @@ const std::vector<InlayHint>* LineInlayHints::GetHints(Sci::Line line) const noe
 	return nullptr;
 }
 
-Sci::Position LineInlayHints::GetInlayInfo(void *buffer, Sci::Position bufferSize) const {
-	const size_t structSize = sizeof(Scintilla::InlayInfo);
-	size_t totalSize = 0;
-
-	// Calculate total size needed
-	for (Sci::Line line = 0; line < hints.Length(); line++) {
-		if (hints[line]) {
-			totalSize += hints[line]->size() * structSize;
+void LineInlayHints::SetInlayInfo(const Scintilla::InlayHintInfo *infoArray, size_t count, bool clearAll) {
+	if (clearAll) {
+		// Wipe everything and reset handle counter
+		hints.DeleteAll();
+		handleCurrent = 0;
+		// Add all input hints as new
+		for (size_t i = 0; i < count; i++) {
+			const auto &info = infoArray[i];
+			const Sci::Line line = static_cast<Sci::Line>(info.line);
+			const Sci::Position pos = static_cast<Sci::Position>(info.position);
+			hints.EnsureLength(line + 1);
+			if (!hints[line]) {
+				hints[line] = std::make_unique<std::vector<InlayHint>>();
+			}
+			const int hintHandle = ++handleCurrent;
+			InlayHint hint(hintHandle, pos, info.text ? info.text : "", info.style);
+			hint.paddingLeft = info.paddingLeft;
+			hint.paddingRight = info.paddingRight;
+			auto it = std::lower_bound(hints[line]->begin(), hints[line]->end(), hint);
+			hints[line]->insert(it, hint);
 		}
-	}
-
-	// If buffer is NULL, return required size
-	if (!buffer) {
-		return static_cast<Sci::Position>(totalSize);
-	}
-
-	// Write to buffer
-	Scintilla::InlayInfo *dest = static_cast<Scintilla::InlayInfo *>(buffer);
-	size_t written = 0;
-
-	for (Sci::Line line = 0; line < hints.Length(); line++) {
-		if (hints[line]) {
-			for (const InlayHint &hint : *hints[line]) {
-				if (written + structSize > static_cast<size_t>(bufferSize)) {
-					return static_cast<Sci::Position>(written);
+	} else {
+		// Delta/merge mode: preserve handles for matching hints
+		// Build map of existing hints keyed by (line, position, text) -> handle
+		struct HintKey {
+			Sci::Line line;
+			Sci::Position position;
+			std::string text;
+			bool operator<(const HintKey &other) const {
+				if (line != other.line) return line < other.line;
+				if (position != other.position) return position < other.position;
+				return text < other.text;
+			}
+		};
+		std::map<HintKey, int> existingHandles;
+		for (Sci::Line line = 0; line < hints.Length(); line++) {
+			if (hints[line]) {
+				for (const InlayHint &hint : *hints[line]) {
+					existingHandles[{line, hint.position, hint.text}] = hint.handle;
 				}
-				dest->handle = hint.handle;
-				dest->line = line;
-				dest->position = hint.position;
-				dest->style = hint.style;
-				dest->text = hint.text.c_str();
-				dest->paddingLeft = hint.paddingLeft;
-				dest->paddingRight = hint.paddingRight;
-				dest++;
-				written += structSize;
 			}
 		}
-	}
 
-	return static_cast<Sci::Position>(written);
+		// Clear all hints
+		hints.DeleteAll();
+
+		// Re-add from input, reusing matched handles
+		for (size_t i = 0; i < count; i++) {
+			const auto &info = infoArray[i];
+			const Sci::Line line = static_cast<Sci::Line>(info.line);
+			const Sci::Position pos = static_cast<Sci::Position>(info.position);
+			hints.EnsureLength(line + 1);
+			if (!hints[line]) {
+				hints[line] = std::make_unique<std::vector<InlayHint>>();
+			}
+
+			// Look up existing handle
+			HintKey key{line, pos, info.text ? info.text : ""};
+			auto it = existingHandles.find(key);
+			int hintHandle;
+			if (it != existingHandles.end()) {
+				hintHandle = it->second;
+				existingHandles.erase(it);
+			} else {
+				hintHandle = ++handleCurrent;
+			}
+
+			InlayHint hint(hintHandle, pos, info.text ? info.text : "", info.style);
+			hint.paddingLeft = info.paddingLeft;
+			hint.paddingRight = info.paddingRight;
+			auto insertIt = std::lower_bound(hints[line]->begin(), hints[line]->end(), hint);
+			hints[line]->insert(insertIt, hint);
+		}
+	}
 }
 
 bool LineInlayHints::HasHints(Sci::Line line) const noexcept {

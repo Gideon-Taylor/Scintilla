@@ -10,6 +10,10 @@
 
 #include <vector>
 
+namespace Scintilla {
+struct InlayHintInfo;
+}
+
 namespace Scintilla::Internal {
 
 class DocWatcher;
@@ -592,7 +596,7 @@ public:
 	void InlayHintRemove(int hintHandle);
 	void InlayHintClearLine(Sci::Line line);
 	void InlayHintClearAll();
-	Sci::Position GetInlayInfo(void *buffer, Sci::Position bufferSize) const;
+	void SetInlayInfo(const Scintilla::InlayHintInfo *infoArray, size_t count, bool clearAll);
 	const std::vector<InlayHint>* InlayHintsForLine(Sci::Line line) const noexcept;
 
 	bool AddWatcher(DocWatcher *watcher, void *userData);
