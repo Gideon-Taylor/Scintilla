@@ -764,7 +764,7 @@ enum class Message {
 	InlayHintRemove = 2902,
 	InlayHintClearLine = 2903,
 	InlayHintClearAll = 2904,
-	GetInlayInfo = 2905,
+	SetInlayInfo = 2905,
 	InlayHintsSupported = 2906,
 	SupportsFeature = 2750,
 	GetLineCharacterIndex = 2710,
