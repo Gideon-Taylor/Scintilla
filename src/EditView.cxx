@@ -2328,13 +2328,52 @@ void EditView::DrawForeground(Surface *surface, const EditModel &model, const Vi
 			} else {
 				// Normal text display
 				if (vsDraw.styles[styleMain].visible) {
-					const std::string_view text(&ll->chars[ts.start], i - ts.start + 1);
-					if (phasesDraw != PhasesDraw::One) {
-						surface->DrawTextTransparent(rcSegment, textFont,
-							ybase, text, textFore);
-					} else {
-						surface->DrawTextNoClip(rcSegment, textFont,
-							ybase, text, textFore, textBack);
+					// Split drawing at inlay hint boundaries so text after an inlay
+					// starts at the shifted x for that position. Drawing one contiguous
+					// run with natural glyph advances would ignore the inlay gap: the
+					// character at the hint (e.g. '@' in @("...")) is painted under the
+					// label while hit-testing still uses the shifted layout slot, so
+					// selecting the "gap" before '(' selects '@'.
+					Sci::Position segStart = ts.start;
+					const Sci::Position segEnd = ts.end(); // exclusive
+					for (const InlayHintLayout &hint : ll->inlayHints) {
+						if (hint.position <= segStart) {
+							continue;
+						}
+						if (hint.position > segEnd) {
+							break;
+						}
+						// Draw up to just before the inlay anchor character
+						if (hint.position > segStart) {
+							PRectangle rcRun = rcLine;
+							rcRun.left = ll->positions[segStart] + horizontalOffset;
+							rcRun.right = ll->positions[hint.position] + horizontalOffset;
+							const std::string_view runText(&ll->chars[segStart],
+								static_cast<size_t>(hint.position - segStart));
+							if (phasesDraw != PhasesDraw::One) {
+								surface->DrawTextTransparent(rcRun, textFont,
+									ybase, runText, textFore);
+							} else {
+								surface->DrawTextNoClip(rcRun, textFont,
+									ybase, runText, textFore, textBack);
+							}
+						}
+						segStart = hint.position;
+					}
+					// Remaining tail (from last inlay anchor / segment start through end)
+					if (segStart < segEnd) {
+						PRectangle rcRun = rcLine;
+						rcRun.left = ll->positions[segStart] + horizontalOffset;
+						rcRun.right = ll->positions[segEnd] + horizontalOffset;
+						const std::string_view runText(&ll->chars[segStart],
+							static_cast<size_t>(segEnd - segStart));
+						if (phasesDraw != PhasesDraw::One) {
+							surface->DrawTextTransparent(rcRun, textFont,
+								ybase, runText, textFore);
+						} else {
+							surface->DrawTextNoClip(rcRun, textFont,
+								ybase, runText, textFore, textBack);
+						}
 					}
 				} else if (vsDraw.styles[styleMain].invisibleRepresentation[0]) {
 					const std::string_view text = vsDraw.styles[styleMain].invisibleRepresentation;
