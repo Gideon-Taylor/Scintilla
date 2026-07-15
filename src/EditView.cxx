@@ -2089,21 +2089,30 @@ void EditView::DrawForeground(Surface *surface, const EditModel &model, const Vi
 			} else {
 				// Normal text display
 				if (vsDraw.styles[styleMain].visible) {
-					// Split drawing at inlay hint boundaries to ensure text after an inlay
-					// starts at the shifted x for that position. Otherwise, drawing one
-					// contiguous run would ignore the gap within the run.
+					// Split drawing at inlay hint boundaries so text after an inlay
+					// starts at the shifted x for that position. Drawing one contiguous
+					// run with natural glyph advances would ignore the inlay gap: the
+					// character at the hint (e.g. '@' in @("...")) is painted under the
+					// label while hit-testing still uses the shifted layout slot, so
+					// selecting the "gap" before '(' selects '@'.
+					// (Present since the original 4-4-6 inlay port; comment clarified after
+					// the same gap was found missing on 5-3-3 / 5-5-0.)
 					Sci::Position segStart = ts.start;
-					const Sci::Position segEnd = ts.end();
-					// Iterate inlay positions that fall within (segStart, segEnd]
+					const Sci::Position segEnd = ts.end(); // exclusive
 					for (const InlayHintLayout &hint : ll->inlayHints) {
-						if (hint.position <= segStart) continue;
-						if (hint.position > segEnd) break;
-						// Draw up to just before hint.position
+						if (hint.position <= segStart) {
+							continue;
+						}
+						if (hint.position > segEnd) {
+							break;
+						}
+						// Draw up to just before the inlay anchor character
 						if (hint.position > segStart) {
 							PRectangle rcRun = rcLine;
 							rcRun.left = ll->positions[segStart] + xStart - static_cast<XYPOSITION>(subLineStart);
 							rcRun.right = ll->positions[hint.position] + xStart - static_cast<XYPOSITION>(subLineStart);
-							const std::string_view runText(&ll->chars[segStart], hint.position - segStart);
+							const std::string_view runText(&ll->chars[segStart],
+								static_cast<size_t>(hint.position - segStart));
 							if (phasesDraw != phasesOne) {
 								surface->DrawTextTransparent(rcRun, textFont,
 									rcRun.top + vsDraw.maxAscent, runText, textFore);
@@ -2114,12 +2123,13 @@ void EditView::DrawForeground(Surface *surface, const EditModel &model, const Vi
 						}
 						segStart = hint.position;
 					}
-					// Draw any remaining tail
+					// Remaining tail (from last inlay anchor / segment start through end)
 					if (segStart < segEnd) {
 						PRectangle rcRun = rcLine;
 						rcRun.left = ll->positions[segStart] + xStart - static_cast<XYPOSITION>(subLineStart);
 						rcRun.right = ll->positions[segEnd] + xStart - static_cast<XYPOSITION>(subLineStart);
-						const std::string_view runText(&ll->chars[segStart], segEnd - segStart);
+						const std::string_view runText(&ll->chars[segStart],
+							static_cast<size_t>(segEnd - segStart));
 						if (phasesDraw != phasesOne) {
 							surface->DrawTextTransparent(rcRun, textFont,
 								rcRun.top + vsDraw.maxAscent, runText, textFore);
